@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import time
 
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 256 # what is the maximum context length for predictions?
 max_iters = 5000
-eval_interval = 500
+eval_interval = 2
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
@@ -103,6 +104,36 @@ class MultiHeadAttention(nn.Module):
         out = self.dropout(self.proj(out))
         return out
 
+class MultiHeadAttentionParallel(nn.Module):
+    """ multiple head of self-attention in parallel computing """
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        assert n_embd == num_heads * head_size
+        self.num_heads = num_heads
+        self.head_size = head_size
+        self.c_attn = nn.Linear(n_embd, n_embd*3)
+        self.c_proj = nn.Linear(n_embd, n_embd)
+        self.attn_dropout = nn.Dropout(dropout)
+        self.resid_dropout = nn.Dropout(dropout)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)).view(1, 1, block_size, block_size))
+
+    def forward(self, x):
+        B,T,C = x.shape
+        x = self.c_attn(x) # (B, T, 3C)
+        q, k, v = x.chunk(3, dim=-1) # (B, T, num_heads*head_size)
+        q = q.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, num_heads, T, head_size)
+        k = k.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, num_heads, T, head_size)
+        v = v.view(B, T, self.num_heads, self.head_size).transpose(1, 2)  # (B, num_heads, T, head_size)
+
+        wei = q @ k.transpose(-2, -1) / (self.head_size**0.5) # (B, num_heads, T, T)
+        wei = wei.masked_fill(self.tril[:, :, :T, :T] == 0, float('-inf'))
+        wei = F.softmax(wei, dim=-1)
+        wei = self.attn_dropout(wei)
+        y = wei @ v # (B, num_heads, T, T) @ (B, num_heads, T, head_size) -> (B, num_heads, T, head_size)
+        y = y.transpose(1, 2).contiguous().view(B, T, n_embd)
+        out = self.resid_dropout(self.c_proj(y))
+        return out
+
 class FeedFoward(nn.Module):
     """ a simple linear layer followed by a non-linearity """
 
@@ -125,7 +156,8 @@ class Block(nn.Module):
         # n_embd: embedding dimension, n_head: the number of heads we'd like
         super().__init__()
         head_size = n_embd // n_head
-        self.sa = MultiHeadAttention(n_head, head_size)
+        #self.sa = MultiHeadAttention(n_head, head_size)
+        self.sa = MultiHeadAttentionParallel(n_head, head_size)
         self.ffwd = FeedFoward(n_embd)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
@@ -203,6 +235,8 @@ print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 # create a PyTorch optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
+start_time = time.time()
+
 for iter in range(max_iters):
 
     # every once in a while evaluate the loss on train and val sets
@@ -219,7 +253,13 @@ for iter in range(max_iters):
     loss.backward()
     optimizer.step()
 
+end_time = time.time()
+execution_time = end_time - start_time
+print(f"Execution time: {execution_time} seconds")
+
+# save model
+torch.save(model.state_dict(), f'char_gpt{end_time}.pth')
+
 # generate from the model
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
 print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
-#open('more.txt', 'w').write(decode(m.generate(context, max_new_tokens=10000)[0].tolist()))
