@@ -2,12 +2,13 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import time
+from datetime import datetime
 
 # hyperparameters
 batch_size = 64 # how many independent sequences will we process in parallel?
 block_size = 256 # what is the maximum context length for predictions?
 max_iters = 5000
-eval_interval = 2
+eval_interval = 500
 learning_rate = 3e-4
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
@@ -258,7 +259,8 @@ execution_time = end_time - start_time
 print(f"Execution time: {execution_time} seconds")
 
 # save model
-torch.save(model.state_dict(), f'char_gpt{end_time}.pth')
+
+torch.save(model.state_dict(), f'char_gpt{datetime.now().strftime("%Y-%m-%d-%H-%M-%S")}.pth')
 
 # generate from the model
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
