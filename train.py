@@ -9,19 +9,30 @@ from amazon_data_loader import load_amazon_dataset
 
 # hyperparameters
 batch_size = 64
-max_iters = 5000
-eval_interval = 100
+block_size = 256 # same value with GPTConfig.block_size, not elegant
+max_iters = 10000
+eval_interval = 500
 learning_rate = 3e-4
 eval_iters = 200
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # ------------
 
-# data loading util function
+ # generate a small batch of data of inputs x and targets y
 def get_batch(data, config):
-    # generate a small batch of data of inputs x and targets y
-    ix = torch.randint(len(data) - config.block_size, (batch_size,))
-    x = torch.stack([data[i:i+config.block_size] for i in ix])
-    y = torch.stack([data[i+1:i+config.block_size+1] for i in ix])
+    if isinstance(data, list): # data is list of sentences, eg: amazon product reviews
+        ix = torch.randint(len(data), (batch_size,))
+        x_list = []
+        y_list = []
+        for i in ix:
+            rand_int = torch.randint(0, len(data[i]) - config.block_size, (1,))
+            x_list.append(data[i][rand_int : rand_int+config.block_size])
+            y_list.append(data[i][rand_int+1 : rand_int+config.block_size+1])
+        x = torch.stack(x_list)
+        y = torch.stack(y_list)
+    else: # just a tensor, list of characters
+        ix = torch.randint(len(data) - config.block_size, (batch_size,))
+        x = torch.stack([data[i:i+config.block_size] for i in ix])
+        y = torch.stack([data[i+1:i+config.block_size+1] for i in ix])
     x, y = x.to(device), y.to(device)
     return x, y
 
@@ -42,11 +53,16 @@ def estimate_loss(model, train_data, val_data):
 
 torch.manual_seed(1337)
 
+"""
 text = load_shakespeare_dataset()
 
 # here are all the unique characters that occur in this text
 chars = sorted(list(set(text)))
-config = GPTConfig(vocab_size = len(chars))
+"""
+
+amazon_dataset = load_amazon_dataset()
+chars = sorted(list(set([char for text in amazon_dataset for char in text])))
+
 # create a mapping from characters to integers
 stoi = { ch:i for i,ch in enumerate(chars) }
 itos = { i:ch for i,ch in enumerate(chars) }
@@ -54,12 +70,13 @@ encode = lambda s: [stoi[c] for c in s] # encoder: take a string, output a list 
 decode = lambda l: ''.join([itos[i] for i in l]) # decoder: take a list of integers, output a string
 
 # Train and test splits
-data = torch.tensor(encode(text), dtype=torch.long)
+data = [torch.tensor(encode(text), dtype=torch.long) for text in amazon_dataset if len(text) > block_size]
+#data = torch.tensor(encode(text), dtype=torch.long)
 n = int(0.9*len(data)) # first 90% will be train, rest val
 train_data = data[:n]
 val_data = data[n:]
 
-
+config = GPTConfig(vocab_size = len(chars))
 model = GPTLanguageModel(config, device)
 m = model.to(device)
 

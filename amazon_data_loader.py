@@ -16,7 +16,7 @@ def load_amazon_dataset():
     df = pd.read_csv('Reviews.csv')
     reviews = df['Text'].tolist()
     reviews_cleanup = [clean_dataset(review) for review in reviews]
-    return review_cleanup
+    return reviews_cleanup
 
 
 """
