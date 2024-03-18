@@ -3,14 +3,15 @@ from datetime import datetime
 import torch
 from gpt import GPTLanguageModel
 from gpt import GPTConfig
-from shakespeare_data_loader import load_shakespeare_dataset
-from amazon_data_loader import load_amazon_dataset
+from data_loader import load_shakespeare_dataset
+from data_loader import load_amazon_dataset
+from data_loader import get_vocab
 
 
 # hyperparameters
 batch_size = 64
 block_size = 256 # same value with GPTConfig.block_size, not elegant
-max_iters = 10000
+max_iters = 5000
 eval_interval = 500
 learning_rate = 3e-4
 eval_iters = 200
@@ -53,15 +54,8 @@ def estimate_loss(model, train_data, val_data):
 
 torch.manual_seed(1337)
 
-"""
-text = load_shakespeare_dataset()
-
-# here are all the unique characters that occur in this text
-chars = sorted(list(set(text)))
-"""
-
 amazon_dataset = load_amazon_dataset()
-chars = sorted(list(set([char for text in amazon_dataset for char in text])))
+chars, EOS = get_vocab()
 
 # create a mapping from characters to integers
 stoi = { ch:i for i,ch in enumerate(chars) }
